@@ -1,5 +1,5 @@
 import { DefaultCache, SWRCache, CacheClearOptions } from './cache'
-import { SWREventManager, DefaultSWREventManager } from './events'
+import { EventTarget } from './eventTarget'
 import { SWRKey } from './key'
 
 /**
@@ -35,7 +35,7 @@ export interface SWROptions<D = any> {
    * Determines the error event target where
    * the errors will be dispatched.
    */
-  errors: SWREventManager
+  errors: EventTarget
 
   /**
    * Determines the fetcher function to use.
@@ -109,7 +109,7 @@ export interface SWROptions<D = any> {
  */
 export const defaultOptions: SWROptions = {
   cache: new DefaultCache(),
-  errors: new DefaultSWREventManager(),
+  errors: new EventTarget(),
   fetcher: async <D>(url: SWRKey): Promise<D> => {
     const response = await fetch(url)
     if (!response.ok) throw Error('Not a 2XX response.')

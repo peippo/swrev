@@ -1,4 +1,4 @@
-import { SWREventManager, DefaultSWREventManager, SWRListener } from './events'
+import { EventTarget } from './eventTarget'
 import { SWRKey } from './key'
 
 /**
@@ -14,6 +14,9 @@ export const defaultCacheRemoveOptions: CacheRemoveOptions = {
 export const defaultCacheClearOptions: CacheClearOptions = {
   broadcast: false,
 }
+
+export type CacheEventData<D> = { data: D }
+export type CacheEvent<D> = CustomEvent<CacheEventData<D>>
 
 /**
  * Determines how a cache item data looks like.
@@ -127,12 +130,12 @@ export interface SWRCache {
   /**
    * Subscribes to the given key for changes.
    */
-  subscribe(key: SWRKey, listener: SWRListener): void
+  subscribe<D>(key: SWRKey, callback: (event: CacheEvent<D>) => void): void
 
   /**
    * Unsubscribes to the given key events.
    */
-  unsubscribe(key: SWRKey, listener: SWRListener): void
+  unsubscribe<D>(key: SWRKey, callback: (event: CacheEvent<D>) => void): void
 
   /**
    * Broadcasts a value change to all subscribed instances.
@@ -152,7 +155,7 @@ export class DefaultCache implements SWRCache {
   /**
    * Stores the event target instance to dispatch and receive events.
    */
-  private event: SWREventManager = new DefaultSWREventManager()
+  private event: EventTarget = new EventTarget()
 
   /**
    * Resolves the promise and replaces the Promise to the resolved data.
@@ -221,21 +224,21 @@ export class DefaultCache implements SWRCache {
   /**
    * Subscribes the callback to the given key.
    */
-  subscribe(key: SWRKey, listener: SWRListener): void {
-    this.event.subscribe(key, listener)
+  subscribe<D>(key: SWRKey, callback: (event: CacheEvent<D>) => void): void {
+    this.event.addEventListener(key, callback as EventListener)
   }
 
   /**
    * Unsubscribes to the given key events.
    */
-  unsubscribe(key: SWRKey, listener: SWRListener): void {
-    this.event.unsubscribe(key, listener)
+  unsubscribe<D>(key: SWRKey, callback: (event: CacheEvent<D>) => void): void {
+    this.event.removeEventListener(key, callback as EventListener)
   }
 
   /**
    * Broadcasts a value change  on all subscribed instances.
    */
   broadcast<D>(key: SWRKey, data: D) {
-    this.event.emit(key, data)
+    this.event.dispatchEvent(new CustomEvent<CacheEventData<D>>(key, { detail: { data } }))
   }
 }
