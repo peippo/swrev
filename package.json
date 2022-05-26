@@ -1,7 +1,7 @@
 {
   "version": "1.10.5",
   "license": "MIT",
-  "name": "swrev",
+  "name": "@peippo/swrev",
   "description": "Framework agnostic stale while revalidate (SWR) data fetching strategy",
   "author": "Erik C. Forés",
   "types": "./dist/swrev.d.ts",
