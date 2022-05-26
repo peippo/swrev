@@ -20,7 +20,7 @@ export type SWRFunctionStateValue<D> = (state: D | null) => D
 /**
  * Determines how a SWR mutate value looks like.
  */
-export type SWRMutateValue<D> = null | D | SWRFunctionStateValue<D>
+export type SWRMutateValue<D> = null | D | CacheItem<D | undefined> | SWRFunctionStateValue<D>
 
 /**
  * Stale While Revalidate
@@ -116,7 +116,12 @@ export class SWR {
     // this would still mutate values when Promise<undefined>
     // meaning the request has failed and the cache takes care of it.
     if (data !== undefined) {
-      this.cache.set(key, new CacheItem({ data }).expiresIn(dedupingInterval))
+      //! CIRCULAR DEPENDENCY; PLEASE TAKE CARE IF YOU ARE WILLING TO MODIFY
+      //! THE FOLLOWING LINE. THE MUTATE METHOD MUST NEVER BE CALLED WITH
+      //! THE REVALIDATE = TRUE PARAMETER INSIDE THIS FUNCTION.
+      await this.mutate(key, new CacheItem({ data }).expiresIn(dedupingInterval), {
+        revalidate: false,
+      })
     }
 
     return await data
@@ -136,18 +141,14 @@ export class SWR {
     if (!key) return undefined
 
     // Get the configuration option of the mutate.
-    const {
-      revalidate: revalidateAfterMutation,
-      revalidateOptions,
-      revalidateFunction,
-    }: SWRMutateOptions = {
+    const { revalidate: revalidateAfterMutation, revalidateOptions }: SWRMutateOptions = {
       ...defaultMutateOptions,
       ...options,
     }
 
     // Define the mutation data, this also resolves the previous
     // state if needed by the value (in case it's a function).
-    let data: D | null | undefined
+    let data: D | CacheItem<D | undefined> | null | undefined
     if (typeof value === 'function') {
       let state: D | null = null
       if (this.cache.has(key)) {
@@ -164,12 +165,13 @@ export class SWR {
     // to cache changes on the respective key. Please note the
     // expiration time of this cache item is set to null, meaning
     // it will be expired by default and replaced by fresh data when possible.
-    this.cache.set(key, new CacheItem({ data }))
+    this.cache.set(key, data instanceof CacheItem ? data : new CacheItem({ data }))
 
     // Check if there's the need to re-validate the data.
-    return revalidateAfterMutation
-      ? await (revalidateFunction?.(key, revalidateOptions) ?? this.revalidate(key, revalidateOptions))
-      : data
+    //! CIRCULAR DEPENDENCY; PLEASE TAKE CARE IF YOU ARE WILLING TO MODIFY
+    //! THE FOLLOWING LINE. THE REVALIDATE METHOD MUST NEVER CALL MUTATE AGAIN
+    //! WITH THE REVALIDATE = TRUE PARAMETER.
+    return revalidateAfterMutation ? await this.revalidate(key, revalidateOptions) : undefined
   }
 
   /**
@@ -261,7 +263,6 @@ export class SWR {
       revalidateOnReconnect,
       reconnectWhen,
       focusWhen,
-      revalidateFunction,
     }: SWROptions<D> = {
       // Current instance options
       // (includes default options)
@@ -271,8 +272,8 @@ export class SWR {
     }
 
     // Revalidates the current SWR key.
-    const revalidateCurrent = (options?: Partial<SWRRevalidateOptions<D>>) => {
-      return revalidateFunction?.(this.resolveKey(key), options) ?? this.revalidate(this.resolveKey(key), options)
+    const revalidateCurrent = <D>(options?: Partial<SWRRevalidateOptions<D>>) => {
+      return this.revalidate(this.resolveKey(key), options)
     }
 
     // Triggers a revalidation with the options of the hook call.
