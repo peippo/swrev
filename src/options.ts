@@ -43,16 +43,15 @@ export interface SWROptions<D = any> {
   fetcher: SWRFetcher<D>
 
   /**
-   * Represents the fallback data to use instead of undefined.
+   * Represents the initial data to use instead of undefined.
    * Keep in mind SWR will still attempt to re-validate
    * unless `revalidateOnStart` is set false.
    */
-  fallbackData: D | undefined
+  initialData: D
 
   /**
    * Determines if we should attempt to load the
-   * initial data from the cache. If this fails, we'll show
-   * the `fallbackData`.
+   * initial data from the cache in case initialData is undefined.
    */
   loadInitialCache: boolean
 
@@ -116,7 +115,7 @@ export const defaultOptions: SWROptions = {
     if (!response.ok) throw Error('Not a 2XX response.')
     return response.json()
   },
-  fallbackData: undefined,
+  initialData: undefined,
   loadInitialCache: true,
   revalidateOnStart: true,
   dedupingInterval: 2000,

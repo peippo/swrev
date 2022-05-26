@@ -29,12 +29,12 @@ export class SWR {
   /**
    * Stores the options of the SWR.
    */
-  public options: SWROptions
+  options: SWROptions
 
   /**
    * Creates a new instance of SWR.
    */
-  public constructor(options?: Partial<SWROptions>) {
+  constructor(options?: Partial<SWROptions>) {
     this.options = { ...defaultOptions, ...options }
   }
 
@@ -55,8 +55,8 @@ export class SWR {
   /**
    * Requests the data using the provided fetcher.
    */
-  protected async requestData<D>(key: SWRKey, fetcher: SWRFetcher<D>): Promise<D | undefined> {
-    return await Promise.resolve(fetcher(key)).catch((data) => {
+  protected requestData<D>(key: SWRKey, fetcher: SWRFetcher<D>): Promise<D | undefined> {
+    return Promise.resolve(fetcher(key)).catch((data) => {
       this.errors.emit(key, data)
       return undefined
     })
@@ -80,7 +80,7 @@ export class SWR {
    * Clear the specified keys from the cache. If no keys
    * are specified, it clears all the cache keys.
    */
-  public clear(keys?: SWRKey | SWRKey[] | null, options?: Partial<CacheClearOptions>) {
+  clear(keys?: SWRKey | SWRKey[] | null, options?: Partial<CacheClearOptions>) {
     const ops: CacheClearOptions = { ...defaultClearOptions, ...options }
     if (keys === undefined || keys === null) return this.cache.clear(ops)
     if (!Array.isArray(keys)) return this.cache.remove(keys, ops)
@@ -90,9 +90,9 @@ export class SWR {
   /**
    * Revalidates the key and mutates the cache if needed.
    */
-  public async revalidate<D = any>(key?: SWRKey, options?: Partial<SWRRevalidateOptions<D>>): Promise<D | undefined> {
+  revalidate<D = any>(key?: SWRKey, options?: Partial<SWRRevalidateOptions<D>>): void {
     // Avoid doing anything if the key resolved to undefined.
-    if (!key) return undefined
+    if (!key) return
 
     // Resolves the options given the defaults.
     const { fetcher: defaultFetcher, dedupingInterval: defaultDedupingInterval } = this.options
@@ -116,15 +116,13 @@ export class SWR {
     // this would still mutate values when Promise<undefined>
     // meaning the request has failed and the cache takes care of it.
     if (data !== undefined) {
-      //! CIRCULAR DEPENDENCY; PLEASE TAKE CARE IF YOU ARE WILLING TO MODIFY
-      //! THE FOLLOWING LINE. THE MUTATE METHOD MUST NEVER BE CALLED WITH
-      //! THE REVALIDATE = TRUE PARAMETER INSIDE THIS FUNCTION.
-      await this.mutate(key, new CacheItem({ data }).expiresIn(dedupingInterval), {
+      // CIRCULAR DEPENDENCY; PLEASE TAKE CARE IF YOU ARE WILLING TO MODIFY
+      // THE FOLLOWING LINE. THE MUTATE METHOD MUST NEVER BE CALLED WITH
+      // THE REVALIDATE = TRUE PARAMETER.
+      this.mutate(key, new CacheItem({ data }).expiresIn(dedupingInterval), {
         revalidate: false,
       })
     }
-
-    return await data
   }
 
   /**
@@ -132,13 +130,9 @@ export class SWR {
    * This is used to replace the cache contents of the
    * given key manually.
    */
-  public async mutate<D = any>(
-    key?: SWRKey,
-    value?: SWRMutateValue<D>,
-    options?: Partial<SWRMutateOptions>
-  ): Promise<D | undefined> {
+  mutate<D = any>(key?: SWRKey, value?: SWRMutateValue<D>, options?: Partial<SWRMutateOptions>): void {
     // Avoid doing anything if the key resolved to undefined.
-    if (!key) return undefined
+    if (!key) return
 
     // Get the configuration option of the mutate.
     const { revalidate: revalidateAfterMutation, revalidateOptions }: SWRMutateOptions = {
@@ -168,10 +162,10 @@ export class SWR {
     this.cache.set(key, data instanceof CacheItem ? data : new CacheItem({ data }))
 
     // Check if there's the need to re-validate the data.
-    //! CIRCULAR DEPENDENCY; PLEASE TAKE CARE IF YOU ARE WILLING TO MODIFY
-    //! THE FOLLOWING LINE. THE REVALIDATE METHOD MUST NEVER CALL MUTATE AGAIN
-    //! WITH THE REVALIDATE = TRUE PARAMETER.
-    return revalidateAfterMutation ? await this.revalidate(key, revalidateOptions) : undefined
+    // CIRCULAR DEPENDENCY; PLEASE TAKE CARE IF YOU ARE WILLING TO MODIFY
+    // THE FOLLOWING LINE. THE REVALIDATE METHOD MUST NEVER CALL MUTATE AGAIN
+    // WITH THE REVALIDATE = TRUE PARAMETER.
+    if (revalidateAfterMutation) this.revalidate(key, revalidateOptions)
   }
 
   /**
@@ -247,14 +241,14 @@ export class SWR {
    */
   public subscribe<D = any, E = Error>(
     key: SWRKey | undefined | (() => SWRKey | undefined),
-    onData?: (value: D) => void,
-    onError?: (error: E) => void,
+    onData: (value: D) => void,
+    onError: (error: E) => void,
     options?: Partial<SWROptions<D>>
   ) {
     // Configuration variables merged with the defaults.
     const {
       fetcher,
-      fallbackData,
+      initialData,
       loadInitialCache,
       revalidateOnStart,
       dedupingInterval,
@@ -271,6 +265,11 @@ export class SWR {
       ...options,
     }
 
+    // Mutates the current SWR key.
+    const mutateCurrent = <D>(value?: SWRMutateValue<D>, options?: Partial<SWRMutateOptions>) => {
+      return this.mutate(this.resolveKey(key), value, options)
+    }
+
     // Revalidates the current SWR key.
     const revalidateCurrent = <D>(options?: Partial<SWRRevalidateOptions<D>>) => {
       return this.revalidate(this.resolveKey(key), options)
@@ -281,21 +280,14 @@ export class SWR {
       return revalidateCurrent({ fetcher, dedupingInterval })
     }
 
-    const cachedData = loadInitialCache ? this.get<D>(this.resolveKey(key)) : fallbackData ?? undefined
-    const revalidatePromise = revalidateOnStart ? revalidateCurrentWithOptions() : Promise.resolve(undefined)
-    const dataPromise = cachedData ? Promise.resolve(cachedData) : revalidatePromise
-
-    // Broadcast the data in case it isn't undefined.
-    // It will be undefined if:
-    // 1. Data not yet on cache
-    // 2. loadInitialCache = false
-    if (cachedData) onData?.(cachedData)
+    // Revalidate the component to fetch new data if needed.
+    if (revalidateOnStart) revalidateCurrentWithOptions()
 
     // Subscribe for changes in data
-    const unsubscribeData = onData ? this.subscribeData<D>(this.resolveKey(key), onData) : undefined
+    const unsubscribeData = this.subscribeData<D>(this.resolveKey(key), onData)
 
     // Subscribe for changes in errors.
-    const unsubscribeErrors = onError ? this.subscribeErrors<E>(this.resolveKey(key), onError) : undefined
+    const unsubscribeErrors = this.subscribeErrors<E>(this.resolveKey(key), onError)
 
     // Subscribe for visibility changes.
     const unsubscribeVisibility = focusWhen(revalidateCurrentWithOptions, {
@@ -310,12 +302,23 @@ export class SWR {
 
     // Unsubscribe handler.
     const unsubscribe = () => {
-      unsubscribeData?.()
-      unsubscribeErrors?.()
+      unsubscribeData()
+      unsubscribeErrors()
       unsubscribeVisibility?.()
       unsubscribeNetwork?.()
     }
 
-    return { unsubscribe, dataPromise, revalidatePromise }
+    // Populate the initial data from the cache.
+    if (initialData) {
+      mutateCurrent(initialData, { revalidate: false })
+    }
+
+    // Determine if there's some cache data we can work with meanwhile.
+    if (loadInitialCache) {
+      const cachedData = this.get<D>(this.resolveKey(key))
+      if (cachedData) onData(cachedData)
+    }
+
+    return { unsubscribe }
   }
 }
